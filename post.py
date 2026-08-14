@@ -6,7 +6,8 @@ import time
 from io import BytesIO
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # masalan: @mening_kanalim yoki -1001234567890
@@ -62,27 +63,50 @@ def _wrap_text(draw, text, font, max_width):
 
 
 def create_topic_image(title: str, translation: str) -> bytes:
-    """Mavzu nomi va uning o'zbekcha tarjimasi tushirilgan chiroyli rasm
-    (PNG) yaratadi va uni bayt ko'rinishida qaytaradi."""
+    """Mavzu nomi va uning o'zbekcha tarjimasi tushirilgan zamonaviy,
+    rang-barang gradient fonli rasm (PNG) yaratadi va uni bayt
+    ko'rinishida qaytaradi."""
 
     width, height = 1080, 720
-    top_color = (24, 49, 84)
-    bottom_color = (54, 103, 158)
 
-    img = Image.new("RGB", (width, height), color=top_color)
+    # --- Diagonal 3-rangli gradient fon (siyohrang -> pushti -> to'q sariq) ---
+    stops = [
+        np.array([76, 29, 149]),    # to'q binafsha
+        np.array([219, 39, 119]),   # pushti
+        np.array([245, 158, 11]),   # to'q sariq
+    ]
+    yy, xx = np.mgrid[0:height, 0:width]
+    t = (xx / width + yy / height) / 2.0  # 0..1 diagonal progress
+    t = np.clip(t, 0, 1)
+
+    seg = t * (len(stops) - 1)
+    idx = np.clip(seg.astype(int), 0, len(stops) - 2)
+    local_t = (seg - idx)[..., None]
+
+    stops_arr = np.array(stops)
+    c0 = stops_arr[idx]
+    c1 = stops_arr[idx + 1]
+    gradient = (c0 + (c1 - c0) * local_t).astype(np.uint8)
+
+    img = Image.fromarray(gradient, mode="RGB").convert("RGBA")
+
+    # --- Dekorativ shaffof doiralar (chuqurlik hissi uchun) ---
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.ellipse([width - 420, -220, width - 420 + 620, -220 + 620], fill=(255, 255, 255, 28))
+    odraw.ellipse([-200, height - 300, -200 + 500, height - 300 + 500], fill=(255, 255, 255, 22))
+    odraw.ellipse([width * 0.55, height * 0.55, width * 0.55 + 260, height * 0.55 + 260], fill=(255, 255, 255, 16))
+    overlay = overlay.filter(ImageFilter.GaussianBlur(2))
+    img = Image.alpha_composite(img, overlay)
+
     draw = ImageDraw.Draw(img)
-    for y in range(height):
-        t = y / height
-        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
-        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
-        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-    title_font = _load_font(_BOLD_FONT_PATHS, 64)
-    subtitle_font = _load_font(_ITALIC_FONT_PATHS, 40)
+    title_font = _load_font(_BOLD_FONT_PATHS, 66)
+    subtitle_font = _load_font(_ITALIC_FONT_PATHS, 38)
     footer_font = _load_font(_ITALIC_FONT_PATHS, 26)
+    brand_font = _load_font(_BOLD_FONT_PATHS, 30)
 
-    max_text_width = width - 160
+    max_text_width = width - 180
 
     title_lines = _wrap_text(draw, title.upper(), title_font, max_text_width)
     subtitle_lines = _wrap_text(draw, f"({translation})", subtitle_font, max_text_width)
@@ -90,17 +114,38 @@ def create_topic_image(title: str, translation: str) -> bytes:
     line_spacing = 14
     title_line_height = title_font.size + line_spacing
     subtitle_line_height = subtitle_font.size + line_spacing
-    gap_between = 30
+    gap_between = 34
 
     total_height = (
         len(title_lines) * title_line_height
         + gap_between
         + len(subtitle_lines) * subtitle_line_height
     )
-    y = (height - total_height) // 2
+    y = (height - total_height) // 2 - 10
+
+    # Sarlavha ostiga yumshoq shaffof "karta" chizamiz (o'qishni osonlashtirish uchun)
+    card_pad_x, card_pad_y = 50, 34
+    card_top = y - card_pad_y
+    card_bottom = y + total_height + card_pad_y
+    card = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    cdraw = ImageDraw.Draw(card)
+    cdraw.rounded_rectangle(
+        [70, card_top, width - 70, card_bottom],
+        radius=28,
+        fill=(15, 15, 30, 70),
+    )
+    img = Image.alpha_composite(img, card)
+    draw = ImageDraw.Draw(img)
+
+    # Yuqori chapga kichik "IELTS SPEAKING" brend yorlig'i
+    brand_text = "IELTS SPEAKING"
+    draw.text((60, 48), brand_text, font=brand_font, fill=(255, 255, 255, 235))
+    draw.line([(60, 48 + brand_font.size + 10), (60 + draw.textlength(brand_text, font=brand_font), 48 + brand_font.size + 10)], fill=(255, 255, 255, 180), width=3)
 
     for line in title_lines:
         w = draw.textlength(line, font=title_font)
+        # Yengil soya
+        draw.text(((width - w) / 2 + 2, y + 2), line, font=title_font, fill=(0, 0, 0, 90))
         draw.text(((width - w) / 2, y), line, font=title_font, fill="white")
         y += title_line_height
 
@@ -108,15 +153,16 @@ def create_topic_image(title: str, translation: str) -> bytes:
 
     for line in subtitle_lines:
         w = draw.textlength(line, font=subtitle_font)
-        draw.text(((width - w) / 2, y), line, font=subtitle_font, fill=(210, 225, 245))
+        draw.text(((width - w) / 2, y), line, font=subtitle_font, fill=(255, 240, 245))
         y += subtitle_line_height
 
     footer_text = "@djami_teacher"
     fw = draw.textlength(footer_text, font=footer_font)
-    draw.text((width - fw - 30, height - footer_font.size - 24), footer_text, font=footer_font, fill=(180, 195, 220))
+    draw.text((width - fw - 40, height - footer_font.size - 34), footer_text, font=footer_font, fill=(255, 255, 255, 210))
 
+    final = img.convert("RGB")
     buf = BytesIO()
-    img.save(buf, format="PNG")
+    final.save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -396,7 +442,9 @@ def main():
         try:
             image_bytes = create_topic_image(header, translation)
             send_photo_to_telegram(image_bytes)
-            send_to_telegram(rest_text)
+            # Mavzu nomini rasmdan tashqari matn postida ham ko'rsatamiz
+            text_with_header = f"📘 <b>{html.escape(header)}</b>\n\n{rest_text}"
+            send_to_telegram(text_with_header)
             sent_with_image = True
         except Exception as e:  # noqa: BLE001
             print("Rasm yaratish/yuborishda xatolik, oddiy matn yuborildi:", e)

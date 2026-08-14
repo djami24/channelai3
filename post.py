@@ -443,7 +443,11 @@ def main():
             image_bytes = create_topic_image(header, translation)
             send_photo_to_telegram(image_bytes)
             # Mavzu nomini rasmdan tashqari matn postida ham ko'rsatamiz
-            text_with_header = f"📘 <b>{html.escape(header)}</b>\n\n{rest_text}"
+            text_with_header = (
+                f"📘 <b>{html.escape(header)}</b>\n"
+                f"<i>({html.escape(translation)})</i>\n\n"
+                f"{rest_text}"
+            )
             send_to_telegram(text_with_header)
             sent_with_image = True
         except Exception as e:  # noqa: BLE001

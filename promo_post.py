@@ -10,7 +10,8 @@ PROMO_TEXT = """📢 <b>Ingliz tilini bilasizmi?</b>
 
 📚 @djami_teacher kanalida har kuni foydali ingliz tili darslari, foydali iboralar va grammatika tushuntirib beriladi.
 
-🤝 Do'stlaringizni ham taklif qiling, havolani ulashing 👉 @djami_teacher"""
+🤝 Do'stlaringizni ham taklif qiling, havolani ulashing.
+👉 @djami_teacher"""
 
 
 def send_to_telegram(text: str) -> None:

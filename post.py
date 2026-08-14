@@ -6,7 +6,8 @@ import requests
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # masalan: @mening_kanalim yoki -1001234567890
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GEMINI_MODEL = "gemini-2.5-flash"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LESSONS_PATH = os.path.join(BASE_DIR, "data", "lessons.json")
@@ -153,22 +154,20 @@ Xomaki matn (JSON):
 {raw}"""
 
     response = requests.post(
-        "https://api.anthropic.com/v1/messages",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
         headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
+            "x-goog-api-key": GEMINI_API_KEY,
             "content-type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}],
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 2000},
         },
         timeout=60,
     )
     response.raise_for_status()
     data = response.json()
-    text = data["content"][0]["text"].strip()
+    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     # Footer har doim borligiga ishonch hosil qilamiz
     if FOOTER not in text:

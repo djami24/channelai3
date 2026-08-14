@@ -1,6 +1,7 @@
 import json
 import os
 import html
+import time
 
 import requests
 
@@ -162,18 +163,35 @@ Xomaki matn (JSON):
 
     last_error = None
     for model_name in GEMINI_MODEL_CANDIDATES:
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-            headers={
-                "x-goog-api-key": GEMINI_API_KEY,
-                "content-type": "application/json",
-            },
-            json={
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 2000},
-            },
-            timeout=60,
-        )
+        # Har bir model uchun 503/429 (vaqtinchalik ortiqcha yuklanish/limit)
+        # holatlarida qisqa kutib, 3 martagacha qayta urinib ko'ramiz.
+        for attempt in range(3):
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY,
+                    "content-type": "application/json",
+                },
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"maxOutputTokens": 2000},
+                },
+                timeout=60,
+            )
+            if response.status_code in (503, 429):
+                wait = 5 * (attempt + 1)
+                print(
+                    f"Model '{model_name}' band/limitga tegdi ({response.status_code}), "
+                    f"{wait}s kutib qayta urinamiz... ({attempt + 1}/3)"
+                )
+                last_error = RuntimeError(f"Model '{model_name}' {response.status_code} qaytardi")
+                time.sleep(wait)
+                continue
+            break  # 503/429 emas — natija bilan davom etamiz (muvaffaqiyat yoki boshqa xato)
+        else:
+            # 3 urinish ham 503/429 bilan tugadi — keyingi modelga o'tamiz
+            continue
+
         if response.status_code == 404:
             # Bu model nomi Google tomonidan endi qo'llab-quvvatlanmayapti —
             # keyingi nomni sinab ko'ramiz.

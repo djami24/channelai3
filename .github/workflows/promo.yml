@@ -1,9 +1,14 @@
-name: Kunlik Reklama Posti
+name: Kunduzgi Reklama Posti
 
 on:
   schedule:
-    # 15:00 UTC -> 20:00 Toshkent (kechki soat 8)
-    - cron: "0 15 * * *"
+    # Vaqtlar UTC bo'yicha. Toshkent (UTC+5) uchun, kunduzi 3 marta:
+    # 05:00 UTC -> 10:00 Toshkent
+    # 09:00 UTC -> 14:00 Toshkent
+    # 13:00 UTC -> 18:00 Toshkent
+    - cron: "0 5 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 13 * * *"
   workflow_dispatch: {}  # "Run workflow" tugmasi orqali qo'lda ham ishga tushirish mumkin
 
 jobs:

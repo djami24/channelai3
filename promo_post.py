@@ -6,11 +6,11 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 
 # Reklama matni — o'zgartirmoqchi bo'lsangiz shu joyni tahrirlang.
-PROMO_TEXT = """📢 Ingliz tilini bilasizmi?
+PROMO_TEXT = """📢 <b>Ingliz tilini bilasizmi?</b>
 
-@djami_teacher kanalida har kuni foydali ingliz tili darslari, foydali iboralar va grammatika tushuntirib beriladi.
+📚 @djami_teacher kanalida har kuni foydali ingliz tili darslari, foydali iboralar va grammatika tushuntirib beriladi.
 
-Bepul. Do'stlaringizni ham taklif qiling — havolani ulashing: @djami_teacher"""
+🎁 Bepul. 🤝 Do'stlaringizni ham taklif qiling, havolani ulashing 👉 @djami_teacher"""
 
 
 def send_to_telegram(text: str) -> None:

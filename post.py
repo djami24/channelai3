@@ -7,7 +7,14 @@ import requests
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # masalan: @mening_kanalim yoki -1001234567890
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-GEMINI_MODEL = "gemini-2.5-flash"
+# Google model nomlarini tez-tez yangilab/eskirtirib turadi, shu sabab bir nechta
+# nomni ketma-ket sinab ko'ramiz — birinchisi 404 bersa, keyingisiga o'tamiz.
+GEMINI_MODEL_CANDIDATES = [
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.0-flash",
+]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LESSONS_PATH = os.path.join(BASE_DIR, "data", "lessons.json")
@@ -153,26 +160,50 @@ BOSHQA QOIDALAR (juda muhim):
 Xomaki matn (JSON):
 {raw}"""
 
-    response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-        headers={
-            "x-goog-api-key": GEMINI_API_KEY,
-            "content-type": "application/json",
-        },
-        json={
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 2000},
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    data = response.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    last_error = None
+    for model_name in GEMINI_MODEL_CANDIDATES:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+            headers={
+                "x-goog-api-key": GEMINI_API_KEY,
+                "content-type": "application/json",
+            },
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 2000},
+            },
+            timeout=60,
+        )
+        if response.status_code == 404:
+            # Bu model nomi Google tomonidan endi qo'llab-quvvatlanmayapti —
+            # keyingi nomni sinab ko'ramiz.
+            print(f"Model '{model_name}' topilmadi (404), keyingisi sinaladi...")
+            last_error = RuntimeError(f"Model '{model_name}' topilmadi (404)")
+            continue
 
-    # Footer har doim borligiga ishonch hosil qilamiz
-    if FOOTER not in text:
-        text = text.rstrip() + f"\n\n{FOOTER}"
-    return text
+        if not response.ok:
+            print("Gemini javobi (xato):", response.status_code, response.text)
+        response.raise_for_status()
+        data = response.json()
+
+        try:
+            candidate = data["candidates"][0]
+        except (KeyError, IndexError) as exc:
+            # Odatda xavfsizlik filtri javobni bloklaganda "candidates" bo'lmaydi
+            # yoki bo'sh bo'ladi — to'liq javobni logga chiqaramiz.
+            print("Gemini javobida 'candidates' topilmadi:", json.dumps(data, ensure_ascii=False))
+            raise RuntimeError(f"Gemini candidates topilmadi: {data.get('promptFeedback', data)}") from exc
+
+        print(f"Model '{model_name}' muvaffaqiyatli ishlatildi.")
+        text = candidate["content"]["parts"][0]["text"].strip()
+
+        # Footer har doim borligiga ishonch hosil qilamiz
+        if FOOTER not in text:
+            text = text.rstrip() + f"\n\n{FOOTER}"
+        return text
+
+    # Barcha model nomlari 404 bergan bo'lsa
+    raise last_error or RuntimeError("Hech qanday Gemini modeli ishlamadi")
 
 
 def send_to_telegram(text: str) -> None:

@@ -137,8 +137,8 @@ def create_topic_image(title: str, translation: str) -> bytes:
     img = Image.alpha_composite(img, card)
     draw = ImageDraw.Draw(img)
 
-    # Yuqori chapga kichik "IELTS SPEAKING" brend yorlig'i
-    brand_text = "IELTS SPEAKING"
+    # Yuqori chapga kichik "@djami_teacher" brend yorlig'i
+    brand_text = "@djami_teacher"
     draw.text((60, 48), brand_text, font=brand_font, fill=(255, 255, 255, 235))
     draw.line([(60, 48 + brand_font.size + 10), (60 + draw.textlength(brand_text, font=brand_font), 48 + brand_font.size + 10)], fill=(255, 255, 255, 180), width=3)
 
@@ -156,7 +156,7 @@ def create_topic_image(title: str, translation: str) -> bytes:
         draw.text(((width - w) / 2, y), line, font=subtitle_font, fill=(255, 240, 245))
         y += subtitle_line_height
 
-    footer_text = "@djami_teacher"
+    footer_text = "Har kuni yangi dars"
     fw = draw.textlength(footer_text, font=footer_font)
     draw.text((width - fw - 40, height - footer_font.size - 34), footer_text, font=footer_font, fill=(255, 255, 255, 210))
 

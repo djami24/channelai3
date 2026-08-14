@@ -1,0 +1,46 @@
+name: IELTS C1 Lesson Poster
+
+on:
+  schedule:
+    # Vaqtlar UTC bo'yicha. Toshkent (UTC+5) uchun faqat kunduzgi soatlar:
+    # 04:00 UTC -> 09:00 Toshkent
+    # 07:00 UTC -> 12:00 Toshkent
+    # 10:00 UTC -> 15:00 Toshkent
+    # 13:00 UTC -> 18:00 Toshkent
+    - cron: "0 4 * * *"
+    - cron: "0 7 * * *"
+    - cron: "0 10 * * *"
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}  # "Run workflow" tugmasi orqali qo'lda ham ishga tushirish mumkin
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo'ni yuklab olish
+        uses: actions/checkout@v4
+
+      - name: Python o'rnatish
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Kutubxonalarni o'rnatish
+        run: pip install -r requirements.txt
+
+      - name: Navbatdagi darsni yuborish
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: python post.py
+
+      - name: Navbat holatini repo'ga qaytarib yozish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/state.json
+          git diff --quiet --cached || git commit -m "chore: update lesson posting state [skip ci]"
+          git push

@@ -6,10 +6,25 @@ import requests
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # masalan: @mening_kanalim yoki -1001234567890
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LESSONS_PATH = os.path.join(BASE_DIR, "data", "lessons.json")
 STATE_PATH = os.path.join(BASE_DIR, "data", "state.json")
+
+FOOTER = "📤 Ulashing: @djami_teacher"
+
+# Faqat AI ishlamay qolgan holatlar uchun zaxira (fallback) formatlash —
+# hech qanday tarmoq xatosida ham post yuborilmay qolmasligi uchun.
+EMOJI_REPLACEMENTS = [
+    ("Meaning:", "💡 Meaning:"),
+    ("Example:", "📝 Example:"),
+    ("Structure:", "🧩 Structure:"),
+    ("Speaking Part", "🗣 Speaking Part"),
+    ("A short real-life story", "📖 A short real-life story"),
+    ("Short real-life story", "📖 Short real-life story"),
+    ("#Exercise:", "✍️ #Exercise:"),
+]
 
 
 def load_lessons():
@@ -29,32 +44,15 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-# Ma'lum bo'limlarga mos emoji qo'shish uchun (tartib muhim: uzunroq
-# iboralar avval tekshiriladi, aks holda "Speaking Part" o'rniga oddiy
-# "Speaking" ga ham moslashib qolishi mumkin)
-EMOJI_REPLACEMENTS = [
-    ("Meaning:", "💡 Meaning:"),
-    ("Example:", "📝 Example:"),
-    ("Structure:", "🧩 Structure:"),
-    ("Speaking Part", "🗣 Speaking Part"),
-    ("A short real-life story", "📖 A short real-life story"),
-    ("Short real-life story", "📖 Short real-life story"),
-    ("#Exercise:", "✍️ #Exercise:"),
-]
+def _fallback_message(lesson: dict) -> str:
+    def add_emojis(text: str) -> str:
+        for phrase, replacement in EMOJI_REPLACEMENTS:
+            text = text.replace(phrase, replacement)
+        return text
 
-FOOTER = "📤 Ulashing: @djami_teacher"
-
-
-def _add_emojis(text: str) -> str:
-    for phrase, replacement in EMOJI_REPLACEMENTS:
-        text = text.replace(phrase, replacement)
-    return text
-
-
-def build_message(lesson: dict) -> str:
     header = html.escape(lesson["header"])
-    meaning = _add_emojis(html.escape(lesson["meaning"]).strip())
-    content = _add_emojis(html.escape(lesson["content"]).strip())
+    meaning = add_emojis(html.escape(lesson["meaning"]).strip())
+    content = add_emojis(html.escape(lesson["content"]).strip())
 
     parts = [f"📘 <b>Dars {lesson['n']}: {header}</b>"]
     if meaning:
@@ -62,6 +60,65 @@ def build_message(lesson: dict) -> str:
     parts.append(content)
     parts.append(FOOTER)
     return "\n\n".join(parts)
+
+
+def build_message_with_ai(lesson: dict) -> str:
+    """AI yordamida dars matnini Telegram uchun chiroyli, tartibli va
+    o'qishga qulay qilib qayta formatlaydi. Asl ingliz va o'zbek matn
+    mazmuni o'zgartirilmaydi — faqat joylashuvi, sarlavhalari va
+    emojilari yaxshilanadi."""
+
+    raw = json.dumps(
+        {
+            "lesson_number": lesson["n"],
+            "header": lesson["header"],
+            "meaning": lesson["meaning"],
+            "content": lesson["content"],
+        },
+        ensure_ascii=False,
+    )
+
+    prompt = f"""Quyida IELTS Speaking uchun C1 darajali ingliz tili darsining xomaki matni JSON
+formatida berilgan. Sen bu matnni Telegram kanal posti uchun CHIROYLI, TARTIBLI va
+O'QISHGA QULAY qilib qayta formatlashing kerak.
+
+QOIDALAR (juda muhim):
+1. Asl mazmunni (ingliz gaplar, o'zbek tarjimalar, misollar, savol-javoblar, hikoya,
+   mashqlar) TO'LIQ saqlab qol — hech narsani qisqartirma, o'zgartirma yoki o'chirma.
+2. Faqat Telegram HTML teglaridan foydalan: <b>qalin</b>, <i>kursiv</i> — boshqa teglar
+   ishlamaydi (masalan <ul>, <table>, markdown ** ishlatma).
+3. Har bir bo'limga (Meaning, Example, Speaking Part, hikoya, Exercise) mos va chiroyli
+   emoji qo'sh, bo'limlar orasida bo'sh qator qoldirib, ko'zga yoqimli tarzda joylashtir.
+4. Eng tepada "📘 <b>Dars {lesson['n']}: <sarlavha></b>" ko'rinishida sarlavha bo'lsin.
+5. Matn oxirida ALBATTA aynan shu qatorni qo'sh (o'zgartirmasdan): "{FOOTER}"
+6. Faqat tayyor Telegram post matnini qaytar — boshqa hech qanday izoh, preambula yoki
+   qo'shtirnoq ishlatma.
+
+Xomaki matn (JSON):
+{raw}"""
+
+    response = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    data = response.json()
+    text = data["content"][0]["text"].strip()
+
+    # Footer har doim borligiga ishonch hosil qilamiz
+    if FOOTER not in text:
+        text = text.rstrip() + f"\n\n{FOOTER}"
+    return text
 
 
 def send_to_telegram(text: str) -> None:
@@ -88,7 +145,12 @@ def main():
     index = state.get("next_index", 0) % len(lessons)
     lesson = lessons[index]
 
-    message = build_message(lesson)
+    try:
+        message = build_message_with_ai(lesson)
+    except Exception as e:  # noqa: BLE001
+        print("AI formatlashda xatolik, zaxira formatga o'tildi:", e)
+        message = _fallback_message(lesson)
+
     send_to_telegram(message)
     print(f"Dars {lesson['n']} yuborildi ({index + 1}/{len(lessons)}).")
 

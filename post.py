@@ -23,7 +23,6 @@ EMOJI_REPLACEMENTS = [
     ("Speaking Part", "🗣 Speaking Part"),
     ("A short real-life story", "📖 A short real-life story"),
     ("Short real-life story", "📖 Short real-life story"),
-    ("#Exercise:", "✍️ #Exercise:"),
 ]
 
 
@@ -54,15 +53,27 @@ def _strip_dashes(text: str) -> str:
     return "\n".join(lines)
 
 
+def _strip_exercise_section(text: str) -> str:
+    """'#Exercise:' (yoki 'Exercise:') dan boshlab matn oxirigacha bo'lgan
+    tarjima-mashq qismini olib tashlaydi (AI ishlamay qolgan holatlar uchun
+    zaxira tozalash)."""
+    for marker in ("#Exercise:", "Exercise:"):
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[:idx].rstrip()
+    return text
+
+
 def _fallback_message(lesson: dict) -> str:
     def add_emojis(text: str) -> str:
         for phrase, replacement in EMOJI_REPLACEMENTS:
             text = text.replace(phrase, replacement)
         return text
 
-    header = html.escape(lesson["header"])
+    header = html.escape(lesson["header"]).upper()
     meaning = add_emojis(_strip_dashes(html.escape(lesson["meaning"]).strip()))
-    content = add_emojis(_strip_dashes(html.escape(lesson["content"]).strip()))
+    content = _strip_exercise_section(lesson["content"])
+    content = add_emojis(_strip_dashes(html.escape(content).strip()))
 
     parts = [f"📘 <b>{header}</b>"]
     if meaning:
@@ -74,9 +85,9 @@ def _fallback_message(lesson: dict) -> str:
 
 def build_message_with_ai(lesson: dict) -> str:
     """AI yordamida dars matnini Telegram uchun chiroyli, tartibli va
-    o'qishga qulay qilib qayta formatlaydi. Asl ingliz va o'zbek matn
-    mazmuni o'zgartirilmaydi — faqat joylashuvi, sarlavhalari va
-    emojilari yaxshilanadi."""
+    o'qishga qulay qilib qayta formatlaydi. Speaking qismlari va hikoya
+    saqlanadi; tarjima mashqlari olib tashlanadi; mavzu tarjimasi, daraja
+    va qisqa grammatik tushuntirish qo'shiladi."""
 
     raw = json.dumps(
         {
@@ -88,24 +99,54 @@ def build_message_with_ai(lesson: dict) -> str:
         ensure_ascii=False,
     )
 
-    prompt = f"""Quyida IELTS Speaking uchun C1 darajali ingliz tili darsining xomaki matni JSON
-formatida berilgan. Sen bu matnni Telegram kanal posti uchun CHIROYLI, TARTIBLI va
-O'QISHGA QULAY qilib qayta formatlashing kerak.
+    prompt = f"""Quyida IELTS Speaking uchun ingliz tili darsining xomaki matni JSON formatida
+berilgan. Sen bu matnni Telegram kanal posti uchun CHIROYLI, TARTIBLI va O'QISHGA QULAY
+qilib qayta formatlashing kerak, quyidagi ANIQ TUZILMA bo'yicha.
 
-QOIDALAR (juda muhim):
-1. Asl mazmunni (ingliz gaplar, o'zbek tarjimalar, misollar, savol-javoblar, hikoya,
-   mashqlar) TO'LIQ saqlab qol — hech narsani qisqartirma, o'zgartirma yoki o'chirma.
+CHIQISH TUZILMASI (shu tartibda, boshqa hech narsa qo'shmasdan):
+
+1-qator: "📘 <b><MAVZU NOMI BUTUNLAY KATTA HARFLARDA></b>"
+2-qator: "<i>(<mavzu nomining o'zbekcha tarjimasi>)</i>"
+3-qator: "🔵 Daraja: <CEFR darajasi, masalan B1, B2, C1 yoki C2>" — matn mazmuni,
+   so'z boyligi va grammatik murakkabligiga qarab darajani o'zing aniqla; agar aniq
+   bo'lmasa, C1 deb qo'y.
+
+Bo'sh qator, so'ng:
+
+"🧩 <b>Bu tuzilma nima uchun ishlatiladi?</b>" sarlavhasi ostida, mavzuning grammatik
+tuzilmasi (masalan "not because... but because...") qachon va nima maqsadda
+ishlatilishini 2-4 gapda, oddiy va tushunarli o'zbek tilida tushuntir.
+
+Bo'sh qator, so'ng:
+
+Xomaki matndagi "Speaking Part" bo'limi(lari) — har bir savol-javobni saqlab qol,
+mos emoji bilan (masalan 🗣). Har bir savolni <b>qalin</b> qilib ber.
+
+Agar xomaki matnda "Structure" yoki "Meaning" kabi tushuntirish qismlari bo'lsa,
+ularni ham mos emoji bilan saqlab qol (mazmunini o'zgartirma).
+
+Agar xomaki matnda hikoya ("short real-life story" yoki shunga o'xshash) bo'lsa,
+uni 📖 emoji bilan, "Short real-life story" kabi inglizcha sarlavha bilan saqlab qol.
+
+MUHIM CHIQARIB TASHLASH QOIDASI:
+- Tarjima mashqlari, "#Exercise:", "Quyidagi gaplarni tarjima qiling" kabi
+  topshiriqlar, raqamlangan tarjima jumlalari va "_________ not because..." kabi
+  bo'sh joy to'ldirish mashqlari BUTUNLAY OLIB TASHLANSIN — ular chiqishga umuman
+  kiritilmasin.
+- Hech qayerda "Dars 1", "Dars 2", "Exercise", "Mashq" kabi so'zlar ishlatilmasin.
+
+BOSHQA QOIDALAR (juda muhim):
+1. Speaking Part va hikoya matnini TO'LIQ saqlab qol — ingliz gaplarni qisqartirma,
+   o'zgartirma yoki o'chirma (faqat yuqoridagi chiqarib tashlash qoidasidagi qismlar
+   olib tashlanadi).
 2. Faqat Telegram HTML teglaridan foydalan: <b>qalin</b>, <i>kursiv</i> — boshqa teglar
    ishlamaydi (masalan <ul>, <table>, markdown ** ishlatma).
-3. Har bir bo'limga (Meaning, Example, Speaking Part, hikoya, Exercise) mos va chiroyli
-   emoji qo'sh, bo'limlar orasida bo'sh qator qoldirib, ko'zga yoqimli tarzda joylashtir.
-4. Xomaki matnda gap boshida uchraydigan uzun tire ("—") belgilarini BUTUNLAY olib
-   tashla — na sarlavhada, na matn ichida, hech qayerda uzun tire ishlatma. Masalan
+3. Bo'limlar orasida bo'sh qator qoldirib, ko'zga yoqimli tarzda joylashtir.
+4. Matnda uchraydigan uzun tire ("—") belgilarini BUTUNLAY olib tashla — na
+   sarlavhada, na matn ichida, hech qayerda uzun tire ishlatma. Masalan
    "— Honestly, I..." o'rniga shunchaki "Honestly, I..." deb yoz.
-5. Eng tepada dars raqami YOZILMASIN ("Dars 1", "Dars 2" kabi hech narsa yo'q) —
-   faqat mavzu nomi bilan boshlansin: "📘 <b><mavzu nomi></b>"
-6. Matn oxirida ALBATTA aynan shu qatorni qo'sh (o'zgartirmasdan): "{FOOTER}"
-7. Faqat tayyor Telegram post matnini qaytar — boshqa hech qanday izoh, preambula yoki
+5. Matn oxirida ALBATTA aynan shu qatorni qo'sh (o'zgartirmasdan): "{FOOTER}"
+6. Faqat tayyor Telegram post matnini qaytar — boshqa hech qanday izoh, preambula yoki
    qo'shtirnoq ishlatma.
 
 Xomaki matn (JSON):

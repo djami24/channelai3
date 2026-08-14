@@ -1,9 +1,12 @@
 import json
 import os
 import html
+import re
 import time
+from io import BytesIO
 
 import requests
+from PIL import Image, ImageDraw, ImageFont
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # masalan: @mening_kanalim yoki -1001234567890
@@ -22,6 +25,125 @@ LESSONS_PATH = os.path.join(BASE_DIR, "data", "lessons.json")
 STATE_PATH = os.path.join(BASE_DIR, "data", "state.json")
 
 FOOTER = "📤 Ulashing: @djami_teacher"
+
+# Mavzu rasmi uchun shrift fayllari — Ubuntu GitHub Actions runnerlarida
+# odatda shu yo'llarda mavjud bo'ladi (fonts-dejavu-core paketi).
+_BOLD_FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+]
+_ITALIC_FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+]
+
+
+def _load_font(paths, size):
+    for path in paths:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def _wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if draw.textlength(trial, font=font) <= max_width:
+            current = trial
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def create_topic_image(title: str, translation: str) -> bytes:
+    """Mavzu nomi va uning o'zbekcha tarjimasi tushirilgan chiroyli rasm
+    (PNG) yaratadi va uni bayt ko'rinishida qaytaradi."""
+
+    width, height = 1080, 720
+    top_color = (24, 49, 84)
+    bottom_color = (54, 103, 158)
+
+    img = Image.new("RGB", (width, height), color=top_color)
+    draw = ImageDraw.Draw(img)
+    for y in range(height):
+        t = y / height
+        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
+        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
+        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+    title_font = _load_font(_BOLD_FONT_PATHS, 64)
+    subtitle_font = _load_font(_ITALIC_FONT_PATHS, 40)
+    footer_font = _load_font(_ITALIC_FONT_PATHS, 26)
+
+    max_text_width = width - 160
+
+    title_lines = _wrap_text(draw, title.upper(), title_font, max_text_width)
+    subtitle_lines = _wrap_text(draw, f"({translation})", subtitle_font, max_text_width)
+
+    line_spacing = 14
+    title_line_height = title_font.size + line_spacing
+    subtitle_line_height = subtitle_font.size + line_spacing
+    gap_between = 30
+
+    total_height = (
+        len(title_lines) * title_line_height
+        + gap_between
+        + len(subtitle_lines) * subtitle_line_height
+    )
+    y = (height - total_height) // 2
+
+    for line in title_lines:
+        w = draw.textlength(line, font=title_font)
+        draw.text(((width - w) / 2, y), line, font=title_font, fill="white")
+        y += title_line_height
+
+    y += gap_between
+
+    for line in subtitle_lines:
+        w = draw.textlength(line, font=subtitle_font)
+        draw.text(((width - w) / 2, y), line, font=subtitle_font, fill=(210, 225, 245))
+        y += subtitle_line_height
+
+    footer_text = "@djami_teacher"
+    fw = draw.textlength(footer_text, font=footer_font)
+    draw.text((width - fw - 30, height - footer_font.size - 24), footer_text, font=footer_font, fill=(180, 195, 220))
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def split_title_block(text: str):
+    """AI formatlagan matnning boshidagi '📘 <b>Sarlavha</b>' va
+    '<i>(tarjima)</i>' qatorlarini ajratib oladi, qolgan matnni (Daraja
+    va undan keyingisi) alohida qaytaradi. Format mos kelmasa (None, None, text)
+    qaytaradi."""
+    lines = text.split("\n")
+    if not lines:
+        return None, None, text
+
+    header_match = re.match(r"^📘\s*<b>(.*?)</b>\s*$", lines[0].strip())
+    if not header_match:
+        return None, None, text
+
+    if len(lines) < 2:
+        return None, None, text
+
+    translation_match = re.match(r"^<i>\(?(.*?)\)?</i>\s*$", lines[1].strip())
+    if not translation_match:
+        return None, None, text
+
+    header = html.unescape(header_match.group(1)).strip()
+    translation = html.unescape(translation_match.group(1)).strip()
+    rest = "\n".join(lines[2:]).lstrip("\n")
+    return header, translation, rest
 
 # Faqat AI ishlamay qolgan holatlar uchun zaxira (fallback) formatlash —
 # hech qanday tarmoq xatosida ham post yuborilmay qolmasligi uchun.
@@ -241,6 +363,19 @@ def send_to_telegram(text: str) -> None:
     resp.raise_for_status()
 
 
+def send_photo_to_telegram(image_bytes: bytes) -> None:
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    resp = requests.post(
+        url,
+        data={"chat_id": TELEGRAM_CHANNEL_ID},
+        files={"photo": ("mavzu.png", image_bytes, "image/png")},
+        timeout=30,
+    )
+    if not resp.ok:
+        print("Telegram (rasm) javobi:", resp.status_code, resp.text)
+    resp.raise_for_status()
+
+
 def main():
     lessons = load_lessons()
     state = load_state()
@@ -254,7 +389,21 @@ def main():
         print("AI formatlashda xatolik, zaxira formatga o'tildi:", e)
         message = _fallback_message(lesson)
 
-    send_to_telegram(message)
+    header, translation, rest_text = split_title_block(message)
+
+    sent_with_image = False
+    if header and translation:
+        try:
+            image_bytes = create_topic_image(header, translation)
+            send_photo_to_telegram(image_bytes)
+            send_to_telegram(rest_text)
+            sent_with_image = True
+        except Exception as e:  # noqa: BLE001
+            print("Rasm yaratish/yuborishda xatolik, oddiy matn yuborildi:", e)
+
+    if not sent_with_image:
+        send_to_telegram(message)
+
     print(f"Dars {lesson['n']} yuborildi ({index + 1}/{len(lessons)}).")
 
     state["next_index"] = (index + 1) % len(lessons)

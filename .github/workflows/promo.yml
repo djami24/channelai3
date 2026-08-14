@@ -1,0 +1,28 @@
+name: Kunlik Reklama Posti
+
+on:
+  schedule:
+    # 15:00 UTC -> 20:00 Toshkent (kechki soat 8)
+    - cron: "0 15 * * *"
+  workflow_dispatch: {}  # "Run workflow" tugmasi orqali qo'lda ham ishga tushirish mumkin
+
+jobs:
+  promo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo'ni yuklab olish
+        uses: actions/checkout@v4
+
+      - name: Python o'rnatish
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Kutubxonalarni o'rnatish
+        run: pip install requests
+
+      - name: Reklama posti yuborish
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: python promo_post.py

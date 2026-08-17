@@ -1,7 +1,6 @@
 import json
 import os
 import html
-import re
 import time
 from io import BytesIO
 
@@ -25,7 +24,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LESSONS_PATH = os.path.join(BASE_DIR, "data", "lessons.json")
 STATE_PATH = os.path.join(BASE_DIR, "data", "state.json")
 
-FOOTER = "📤 Ulashing: @djami_teacher"
+FOOTER = "🤖 AI tomonidan tayyorlandi\n\n📢 Ulashing: @djami_teacher"
 
 # Mavzu rasmi uchun shrift fayllari — Ubuntu GitHub Actions runnerlarida
 # odatda shu yo'llarda mavjud bo'ladi (fonts-dejavu-core paketi).
@@ -166,31 +165,6 @@ def create_topic_image(title: str, translation: str) -> bytes:
     return buf.getvalue()
 
 
-def split_title_block(text: str):
-    """AI formatlagan matnning boshidagi '📘 <b>Sarlavha</b>' va
-    '<i>(tarjima)</i>' qatorlarini ajratib oladi, qolgan matnni (Daraja
-    va undan keyingisi) alohida qaytaradi. Format mos kelmasa (None, None, text)
-    qaytaradi."""
-    lines = text.split("\n")
-    if not lines:
-        return None, None, text
-
-    header_match = re.match(r"^📘\s*<b>(.*?)</b>\s*$", lines[0].strip())
-    if not header_match:
-        return None, None, text
-
-    if len(lines) < 2:
-        return None, None, text
-
-    translation_match = re.match(r"^<i>\(?(.*?)\)?</i>\s*$", lines[1].strip())
-    if not translation_match:
-        return None, None, text
-
-    header = html.unescape(header_match.group(1)).strip()
-    translation = html.unescape(translation_match.group(1)).strip()
-    rest = "\n".join(lines[2:]).lstrip("\n")
-    return header, translation, rest
-
 # Faqat AI ishlamay qolgan holatlar uchun zaxira (fallback) formatlash —
 # hech qanday tarmoq xatosida ham post yuborilmay qolmasligi uchun.
 EMOJI_REPLACEMENTS = [
@@ -242,21 +216,19 @@ def _strip_exercise_section(text: str) -> str:
 
 
 def _fallback_message(lesson: dict) -> str:
+    """AI ishlamay qolganda ishlatiladigan zaxira formatlash. Faqat body
+    (sarlavha/tarjimasiz) qaytaradi — sarlavha va tarjima main() da
+    lesson['header']/lesson['meaning']'dan alohida qo'shiladi."""
+
     def add_emojis(text: str) -> str:
         for phrase, replacement in EMOJI_REPLACEMENTS:
             text = text.replace(phrase, replacement)
         return text
 
-    header = html.escape(lesson["header"]).upper()
-    meaning = add_emojis(_strip_dashes(html.escape(lesson["meaning"]).strip()))
     content = _strip_exercise_section(lesson["content"])
     content = add_emojis(_strip_dashes(html.escape(content).strip()))
 
-    parts = [f"📘 <b>{header}</b>"]
-    if meaning:
-        parts.append(meaning)
-    parts.append(content)
-    parts.append(FOOTER)
+    parts = [content, FOOTER]
     return "\n\n".join(parts)
 
 
@@ -280,11 +252,10 @@ def build_message_with_ai(lesson: dict) -> str:
 berilgan. Sen bu matnni Telegram kanal posti uchun CHIROYLI, TARTIBLI va O'QISHGA QULAY
 qilib qayta formatlashing kerak, quyidagi ANIQ TUZILMA bo'yicha.
 
-CHIQISH TUZILMASI (shu tartibda, boshqa hech narsa qo'shmasdan):
+CHIQISH TUZILMASI (shu tartibda, boshqa hech narsa qo'shmasdan — MAVZU NOMI VA
+TARJIMASINI HECH QACHON YOZMA, ular dastur tomonidan alohida qo'shiladi):
 
-1-qator: "📘 <b><MAVZU NOMI BUTUNLAY KATTA HARFLARDA></b>"
-2-qator: "<i>(<mavzu nomining o'zbekcha tarjimasi>)</i>"
-3-qator: "🔵 Daraja: <CEFR darajasi, masalan B1, B2, C1 yoki C2>" — matn mazmuni,
+1-qator: "🔵 Daraja: <CEFR darajasi, masalan B1, B2, C1 yoki C2>" — matn mazmuni,
    so'z boyligi va grammatik murakkabligiga qarab darajani o'zing aniqla; agar aniq
    bo'lmasa, C1 deb qo'y.
 
@@ -324,7 +295,8 @@ BOSHQA QOIDALAR (juda muhim):
    "— Honestly, I..." o'rniga shunchaki "Honestly, I..." deb yoz.
 5. Matn oxirida ALBATTA aynan shu qatorni qo'sh (o'zgartirmasdan): "{FOOTER}"
 6. Faqat tayyor Telegram post matnini qaytar — boshqa hech qanday izoh, preambula yoki
-   qo'shtirnoq ishlatma.
+   qo'shtirnoq ishlatma. Chiqish "🔵 Daraja:" qatoridan boshlansin — 📘 yoki mavzu
+   nomi/tarjimasi bilan HECH QACHON boshlanmasin.
 
 Xomaki matn (JSON):
 {raw}"""
@@ -429,32 +401,33 @@ def main():
     index = state.get("next_index", 0) % len(lessons)
     lesson = lessons[index]
 
+    header = lesson["header"].strip()
+    translation = lesson["meaning"].strip()
+
     try:
-        message = build_message_with_ai(lesson)
+        body = build_message_with_ai(lesson)
     except Exception as e:  # noqa: BLE001
         print("AI formatlashda xatolik, zaxira formatga o'tildi:", e)
-        message = _fallback_message(lesson)
+        body = _fallback_message(lesson)
 
-    header, translation, rest_text = split_title_block(message)
+    # Sarlavha va tarjima ENDI HAR DOIM lessons.json'dan (header/meaning) olinadi,
+    # AI matnini parsing qilishga bog'liq emas — shu sababli rasm hech qachon
+    # "tushmay qolmaydi".
+    text_with_header = (
+        f"📘 <b>{html.escape(header.upper())}</b>\n"
+        f"<i>({html.escape(translation)})</i>\n\n"
+        f"{body}"
+    )
 
-    sent_with_image = False
-    if header and translation:
-        try:
-            image_bytes = create_topic_image(header, translation)
-            send_photo_to_telegram(image_bytes)
-            # Mavzu nomini rasmdan tashqari matn postida ham ko'rsatamiz
-            text_with_header = (
-                f"📘 <b>{html.escape(header)}</b>\n"
-                f"<i>({html.escape(translation)})</i>\n\n"
-                f"{rest_text}"
-            )
-            send_to_telegram(text_with_header)
-            sent_with_image = True
-        except Exception as e:  # noqa: BLE001
-            print("Rasm yaratish/yuborishda xatolik, oddiy matn yuborildi:", e)
+    # Avval rasmni yuborishga urinamiz; tarmoq xatosi bo'lsa ham davom etamiz —
+    # matn postini baribir yuboramiz, faqat rasmsiz.
+    try:
+        image_bytes = create_topic_image(header, translation)
+        send_photo_to_telegram(image_bytes)
+    except Exception as e:  # noqa: BLE001
+        print("Rasm yaratish/yuborishda xatolik, faqat matn yuboriladi:", e)
 
-    if not sent_with_image:
-        send_to_telegram(message)
+    send_to_telegram(text_with_header)
 
     print(f"Dars {lesson['n']} yuborildi ({index + 1}/{len(lessons)}).")
 
